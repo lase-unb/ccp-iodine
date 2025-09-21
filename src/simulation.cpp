@@ -27,16 +27,6 @@ namespace {
                  spark::random::normal(0.0, vth)};
         };
     }
-
-    auto maxwellian_emitter_iodine(double t, double lx, double ly, double m) {
-        return [t, lx, ly, m](spark::core::Vec<3>& v, spark::core::Vec<2>& x) {
-            x.x = lx * spark::random::uniform();
-            x.y = ly * spark::random::uniform();
-            double vth = std::sqrt((spark::constants::kb * t * 8) / (spark::constants::pi * m));
-            v = {spark::random::normal(0.0, vth), spark::random::normal(0.0, vth),
-                 spark::random::normal(0.0, vth)};
-        };
-    }
 } // namespace
 
 namespace spark {
@@ -148,7 +138,7 @@ void Simulation::reduce_rho() {
     auto* ni_im = ion_density_im_.data_ptr();
 
     for (size_t i = 0; i < rho_field_.n_total(); ++i) {
-        rho_ptr[i] = k * (ni[i] + ni_i2[i] + ni_im[i] - ne[i]);
+        rho_ptr[i] = k * (ni[i] + ni_i2[i] - ni_im[i] - ne[i]);
     }
 }
 
@@ -159,23 +149,23 @@ Events<Simulation::Event, Simulation::EventAction>& Simulation::events() {
 void Simulation::set_initial_conditions() {
     electrons_ = spark::particle::ChargedSpecies<2, 3>(-spark::constants::e, spark::constants::m_e);
     electrons_.add(
-        0.1 * parameters_.n_initial,
+        parameters_.n_initial,
         maxwellian_emitter(parameters_.te, parameters_.lx, parameters_.ly, spark::constants::m_e));
 
     ions_ = spark::particle::ChargedSpecies<2, 3>(spark::constants::e, parameters_.m_i);
     ions_.add(
-        0.1 * parameters_.n_initial,
-        maxwellian_emitter_iodine(parameters_.ti, parameters_.lx, parameters_.ly, parameters_.m_i));
+        parameters_.n_initial,
+        maxwellian_emitter(parameters_.ti, parameters_.lx, parameters_.ly, parameters_.m_i));
 
     ions_i2_ = spark::particle::ChargedSpecies<2, 3>(spark::constants::e, 2.0 * parameters_.m_i);
     ions_i2_.add(
-        0.1 * parameters_.n_initial,
-        maxwellian_emitter_iodine(parameters_.ti, parameters_.lx, parameters_.ly, 2.0 * parameters_.m_i));
+        parameters_.n_initial,
+        maxwellian_emitter(parameters_.ti, parameters_.lx, parameters_.ly, 2.0 * parameters_.m_i));
         
     ions_im_slow_ = spark::particle::ChargedSpecies<2, 3>(-spark::constants::e, parameters_.m_i);
     ions_im_slow_.add(
-        0.1 * parameters_.n_initial,
-        maxwellian_emitter_iodine(parameters_.ti, parameters_.lx, parameters_.ly, parameters_.m_i));
+        parameters_.n_initial,
+        maxwellian_emitter(parameters_.ti, parameters_.lx, parameters_.ly, parameters_.m_i));
 
     electron_density_ = spark::spatial::UniformGrid<2>({parameters_.lx, parameters_.ly},
                                                       {parameters_.nx, parameters_.ny});
@@ -206,7 +196,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_electron_reactions_iodi
     auto electron_reactions_iodine = cross_section::load_electron_reactions_iodine_1(data_path_, parameters_.tg, &ions_);
     spark::collisions::ReactionConfig<2, 3> electron_reaction_config{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni, parameters_.tg),
         .reactions = electron_reactions_iodine,
         .dyn = spark::collisions::RelativeDynamics::FastProjectile
     };
@@ -217,7 +207,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_electron_reactions_iodi
     auto electron_reactions_iodine2 = cross_section::load_electron_reactions_iodine_2(data_path_, parameters_.tg, &ions_i2_, &ions_, &ions_im_slow_);
     spark::collisions::ReactionConfig<2, 3> electron_reaction_config_i2{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni2, parameters_.tg),
         .reactions = electron_reactions_iodine2,
         .dyn = spark::collisions::RelativeDynamics::FastProjectile
     };
@@ -228,7 +218,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_ion_collisions() {
     auto ion_reactions_iodine = cross_section::load_atomic_ion_reactions_iodine_1(data_path_, parameters_.tg, &ions_);
     spark::collisions::ReactionConfig<2, 3> ion_reaction_config{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni, parameters_.tg),
         .reactions = ion_reactions_iodine,
         .dyn = spark::collisions::RelativeDynamics::SlowProjectile
     };
@@ -239,7 +229,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_ion_collisions_i2() {
     auto ion_reactions_iodine_i2 = cross_section::load_atomic_ion_reactions_iodine_2(data_path_, parameters_.tg, &ions_i2_);
     spark::collisions::ReactionConfig<2, 3> ion_reaction_config_i2{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni2, parameters_.tg),
         .reactions = ion_reactions_iodine_i2,
         .dyn = spark::collisions::RelativeDynamics::SlowProjectile
     };
@@ -250,7 +240,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_ion_collisions_molecula
     auto ion_reactions_molecular = cross_section::load_molecular_ion_reactions_iodine_1(data_path_, parameters_.tg, &ions_i2_);
     spark::collisions::ReactionConfig<2, 3> ion_reaction_config_molecular{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni, parameters_.tg),
         .reactions = ion_reactions_molecular,
         .dyn = spark::collisions::RelativeDynamics::SlowProjectile
     };
@@ -261,7 +251,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_ion_collisions_negative
     auto ion_reactions_negative = cross_section::load_negative_ion_reactions_iodine_1(data_path_);
     spark::collisions::ReactionConfig<2, 3> ion_reaction_config_im{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni, parameters_.tg),
         .reactions = ion_reactions_negative,
         .dyn = spark::collisions::RelativeDynamics::SlowProjectile
     };
@@ -272,7 +262,7 @@ spark::collisions::MCCReactionSet<2, 3> Simulation::load_ion_collisions_negative
     auto ion_reactions_negative_i2 = cross_section::load_negative_ion_reactions_iodine_2(data_path_);
     spark::collisions::ReactionConfig<2, 3> ion_reaction_config{
         .dt = parameters_.dt,
-        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ng, parameters_.tg),
+        .target = std::make_shared<spark::collisions::StaticUniformTarget<2, 3>>(parameters_.ni2, parameters_.tg),
         .reactions = ion_reactions_negative_i2,
         .dyn = spark::collisions::RelativeDynamics::SlowProjectile
     };

@@ -14,7 +14,8 @@ struct Parameters {
     double ly;
     double dx;
     double dy;
-    double ng;
+    double ni;
+    double ni2;
     double tg;
     double te;
     double ti;
